@@ -293,6 +293,15 @@ func (c *BeClient) GetResponse() *http.Response {
 // @return []byte 响应体Body内容
 // @return error  错误信息
 func (c *BeClient) send(resData interface{}, resContentType ...ContentTypeType) error {
+	// 延迟判断是否需要Debug日志
+	defer func() {
+		// 是否需要打印Debug
+		if c.debug {
+			fmt.Printf("\n\nBeClient: %+v\n", *c)
+			fmt.Printf("\nRequest: %+v\n", *c.request)
+			fmt.Printf("\nResponse: %+v\n\n", *c.response)
+		}
+	}()
 	// 创建客户端
 	c.createClient()
 	// 创建请求体
@@ -310,42 +319,10 @@ func (c *BeClient) send(resData interface{}, resContentType ...ContentTypeType) 
 	}
 	// 结束时释放响应体
 	defer res.Body.Close()
-	// 定义响应体
-	var resBody []byte
+	// 将响应体赋值到全局
+	c.response = res
 	// 判断是否为下载请求
 	if c.isDownloadRequest { // 下载请求
-		// 判断是否需要下载进度回调
-		if c.downloadCallFunc == nil { // 不需要下载进度回调
-			// 直接获取全部内容
-			resBody, err = ioutil.ReadAll(res.Body)
-			if err != nil {
-				return err
-			}
-		} else { // 需要下载进度回调
-			// 读取响应
-			for {
-				// 定义临时变量
-				temp := make([]byte, 1024*5)
-				// 读取响应体
-				size, err := res.Body.Read(temp)
-				if err != nil {
-					// 读取结束，跳出循环
-					if err == io.EOF {
-						// 追加内容
-						resBody = append(resBody, temp[:size]...)
-						// 回调进度
-						c.downloadCallFunc(float64(len(resBody)), float64(res.ContentLength))
-						break
-					}
-					// 有错误，直接返回错误
-					return err
-				}
-				// 追加内容
-				resBody = append(resBody, temp[:size]...)
-				// 回调进度
-				c.downloadCallFunc(float64(len(resBody)), float64(res.ContentLength))
-			}
-		}
 		// 判断是否需要保存到文件中
 		if len(c.downloadSavePath) >= 0 { // 需要保存到文件中
 			// 判断文件夹部分是否为空
@@ -357,26 +334,67 @@ func (c *BeClient) send(resData interface{}, resContentType ...ContentTypeType) 
 					return err
 				}
 			}
-			// 保存文件
-			err = ioutil.WriteFile(c.downloadSavePath, resBody, 0666)
-			if err != nil { // 保存失败
+			// 打开文件，边下载边写入，防止内存占用高
+			file, err := os.OpenFile(c.downloadSavePath, os.O_CREATE|os.O_WRONLY|os.O_SYNC, 0666)
+			if err != nil {
 				return err
 			}
+			// 延迟关闭文件
+			defer file.Close()
+			// 定义已下载的大小
+			var currSize int
+			// 读取响应
+			for {
+				// 定义临时变量（每次读5MB）
+				temp := make([]byte, 1024*5)
+				// 读取响应体
+				size, err := res.Body.Read(temp)
+				// 追加已下载大小
+				currSize += size
+				// 判断读取是否正确
+				if err != nil {
+					// 读取结束，跳出循环
+					if err == io.EOF {
+						// 写入到文件
+						n, err := file.Write(temp[:size])
+						// 判断是否写入正确
+						if err != nil {
+							return err
+						}
+						if n != size {
+							return errors.New("write to file byte length inconsistency")
+						}
+						// 回调进度
+						c.downloadCallFunc(float64(currSize), float64(res.ContentLength))
+						// 跳出循环
+						break
+					}
+					// 有错误，直接返回错误
+					return err
+				}
+				// 写入到文件
+				n, err := file.Write(temp[:size])
+				// 判断是否写入正确
+				if err != nil {
+					return err
+				}
+				if n != size {
+					return errors.New("write to file byte length inconsistency")
+				}
+				// 回调进度
+				c.downloadCallFunc(float64(currSize), float64(res.ContentLength))
+			}
+			// 下载成功
+			return nil
 		}
-	} else { // 普通请求
-		// 直接获取全部内容
-		resBody, err = ioutil.ReadAll(res.Body)
-		if err != nil {
-			return err
-		}
+		// 没有保存路径，直接报错
+		return errors.New("download file save path is null")
 	}
-	// 将响应体赋值到全局
-	c.response = res
-	// 是否需要打印Debug
-	if c.debug {
-		fmt.Printf("\n\nBeClient: %+v\n", *c)
-		fmt.Printf("\nRequest: %+v\n", *c.request)
-		fmt.Printf("\nResponse: %+v\n\n", *c.response)
+	// 普通请求
+	// 直接获取全部内容
+	resBody, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return err
 	}
 	// 转换响应内容，结束请求
 	return c.responseConverData(resBody, resData, resContentType...)
