@@ -323,6 +323,14 @@ func (c *BeClient) send(resData interface{}, resContentType ...ContentTypeType) 
 	c.response = res
 	// 判断是否为下载请求
 	if c.isDownloadRequest { // 下载请求
+		// 判断是否请求成功
+		if res.StatusCode != http.StatusOK {
+			errBody, err := ioutil.ReadAll(res.Body)
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf(string(errBody))
+		}
 		// 判断是否需要保存到文件中
 		if len(c.downloadSavePath) >= 0 { // 需要保存到文件中
 			// 判断文件夹部分是否为空
