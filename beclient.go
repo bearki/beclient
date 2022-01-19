@@ -62,6 +62,8 @@ func New(baseURL string) *BeClient {
 	if len(u.Path) > 0 {
 		c.Path(u.Path)
 	}
+	// 初始化query参数
+	c.querys = make(url.Values)
 	// 判断是否需要处理URL参数
 	query := u.Query()
 	if len(query) > 0 {
