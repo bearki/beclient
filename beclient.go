@@ -307,7 +307,10 @@ func (c *BeClient) send(resData interface{}, resContentType ...ContentTypeType) 
 	// 创建客户端
 	c.createClient()
 	// 创建请求体
-	c.createRequest()
+	err := c.createRequest()
+	if err != nil {
+		return err
+	}
 	// 结束时释放请求体
 	defer c.request.Body.Close()
 	// 发起请求
