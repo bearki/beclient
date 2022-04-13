@@ -53,6 +53,8 @@ type DownloadCallbackFuncType func(currSize, totalSize float64)
 func New(baseURL string, disabledBaseURLParse ...bool) *BeClient {
 	// 新建客户端
 	c := new(BeClient)
+	// 初始化query参数
+	c.querys = make(url.Values)
 	// 初始化默认超时时间为15秒
 	c.TimeOut(time.Second * 15)
 	// 初始化默认资源类型
@@ -63,7 +65,7 @@ func New(baseURL string, disabledBaseURLParse ...bool) *BeClient {
 		c.baseURL = baseURL
 		return c
 	}
-	// 处理基本网址
+	// 解析基本网址
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		c.errMsg = err
@@ -75,14 +77,9 @@ func New(baseURL string, disabledBaseURLParse ...bool) *BeClient {
 	if len(u.Path) > 0 {
 		c.Path(u.Path)
 	}
-	// 初始化query参数
-	c.querys = make(url.Values)
 	// 判断是否需要处理URL参数
-	query := u.Query()
-	if len(query) > 0 {
-		for key := range query {
-			c.Query(key, query.Get(key))
-		}
+	for key := range u.Query() {
+		c.Query(key, u.Query().Get(key))
 	}
 	// 返回创建的客户端
 	return c
@@ -95,36 +92,27 @@ func New(baseURL string, disabledBaseURLParse ...bool) *BeClient {
 func (c *BeClient) Path(pathURL string) *BeClient {
 	// 禁用地址解析后该函数禁用
 	if c.disabledBaseURLParse {
+		c.errMsg = errors.New("disabled base url parse is open, Path function disabled")
 		return c
 	}
 	// 根据第一个问号分割字符串
 	index := strings.Index(pathURL, "?")
 	if index > -1 {
-		// 裁剪字符串
-		pathURL = pathURL[:index]
-		query := pathURL[index+1:]
-		// 解析参数
-		queryMap := make(map[string]string)
-		err := form.DecodeString(&queryMap, query)
-		if err != nil {
-			c.errMsg = err
-			return c
-		}
-		index := strings.Index(pathURL, "?")
-		if index > -1 {
-			// 裁剪字符串
-			query := pathURL[index-1:]
-			pathURL = pathURL[:index]
+		// 截取路径部分
+		c.pathURL += pathURL[:index]
+		// 判断是否需要处理参数部分
+		if len(pathURL[index:]) > 1 {
+			// 截取参数部分
+			query := pathURL[index+1:]
 			// 解析参数
-			queryMap := make(map[string]string)
-			err := form.DecodeString(&queryMap, query)
+			values, err := url.ParseQuery(query)
 			if err != nil {
 				c.errMsg = err
 				return c
 			}
 			// 遍历赋值参数
-			for key, val := range queryMap {
-				c.Query(key, val)
+			for key := range values {
+				c.Query(key, values.Get(key))
 			}
 		}
 	} else {
@@ -204,8 +192,11 @@ func (c *BeClient) Body(reqBody interface{}) *BeClient {
 // @return          *BeClient                客户端指针
 func (c *BeClient) Download(savePath string, callback DownloadCallbackFuncType) *BeClient {
 	c.isDownloadRequest = true
-	c.downloadSavePath = filepath.Join(savePath) // 处理一下传入的路径
-	c.downloadCallFunc = callback
+	c.downloadSavePath = filepath.Join(savePath)              // 处理一下传入的路径
+	c.downloadCallFunc = func(currSize, totalSize float64) {} // 默认什么都不干
+	if callback != nil {
+		c.downloadCallFunc = callback
+	}
 	return c
 }
 
@@ -331,6 +322,10 @@ func (c *BeClient) send(resData interface{}, resContentType ...ContentTypeType) 
 			fmt.Printf("\nResponse: %+v\n\n", *c.response)
 		}
 	}()
+	// 是否有全局异常
+	if c.errMsg != nil {
+		return c.errMsg
+	}
 	// 创建客户端
 	c.createClient()
 	// 创建请求体
@@ -374,6 +369,10 @@ func (c *BeClient) send(resData interface{}, resContentType ...ContentTypeType) 
 					return err
 				}
 			}
+			// 定义缓冲区大小
+			var tmpBufSize int64 = 1024 * 5
+			// 定义缓冲区
+			tmpBuf := make([]byte, tmpBufSize)
 			// 打开文件，边下载边写入，防止内存占用高
 			file, err := os.OpenFile(c.downloadSavePath, os.O_CREATE|os.O_WRONLY|os.O_SYNC, 0666)
 			if err != nil {
@@ -382,43 +381,25 @@ func (c *BeClient) send(resData interface{}, resContentType ...ContentTypeType) 
 			// 延迟关闭文件
 			defer file.Close()
 			// 定义已下载的大小
-			var currSize int
+			var currSize int64
 			// 读取响应
-			for {
-				// 定义临时变量（每次读5MB）
-				temp := make([]byte, 1024*5)
+			for currSize < res.ContentLength {
 				// 读取响应体
-				size, err := res.Body.Read(temp)
+				size, err := res.Body.Read(tmpBuf)
 				// 追加已下载大小
-				currSize += size
+				currSize += int64(size)
 				// 判断读取是否正确
-				if err != nil {
-					// 读取结束，跳出循环
-					if err == io.EOF {
-						// 写入到文件
-						n, err := file.Write(temp[:size])
-						// 判断是否写入正确
-						if err != nil {
-							return err
-						}
-						if n != size {
-							return errors.New("write to file byte length inconsistency")
-						}
-						// 回调进度
-						c.downloadCallFunc(float64(currSize), float64(res.ContentLength))
-						// 跳出循环
-						break
-					}
+				if err != nil && !errors.Is(err, io.EOF) {
 					// 有错误，直接返回错误
 					return err
 				}
 				// 写入到文件
-				n, err := file.Write(temp[:size])
+				writeLength, err := file.Write(tmpBuf[:size])
 				// 判断是否写入正确
 				if err != nil {
 					return err
 				}
-				if n != size {
+				if writeLength != size {
 					return errors.New("write to file byte length inconsistency")
 				}
 				// 回调进度
