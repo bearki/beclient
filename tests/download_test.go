@@ -15,9 +15,7 @@ func TestDownload(t *testing.T) {
 		Debug().
 		TimeOut(time.Hour*10).
 		// Debug().
-		Download("qqq.jpg", func(currSize, totalSize float64) {
-			fmt.Println("下载进度:", int64((currSize/totalSize)*100), "%")
-		}).
+		Download("qqq.jpg", func(currSize, totalSize float64) {}).
 		Get(nil),
 	)
 	fmt.Println(b)
