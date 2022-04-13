@@ -82,26 +82,35 @@ func New(baseURL string) *BeClient {
 // @params pathURL string    路由地址
 // @return         *BeClient 客户端指针
 func (c *BeClient) Path(pathURL string) *BeClient {
-	// 根据第一个问号分割字符串
-	index := strings.Index(pathURL, "?")
-	if index > -1 {
-		// 裁剪字符串
-		query := pathURL[index-1:]
-		pathURL = pathURL[:index]
-		// 解析参数
-		queryMap := make(map[string]string)
-		err := form.DecodeString(&queryMap, query)
-		if err != nil {
-			c.errMsg = err
+	// 路径中是否存在问号
+	if strings.Contains(pathURL, "?") {
+		// 根据问号分割字符串为两个子串
+		pathAndQuery := strings.SplitN(pathURL, "?", 2)
+		if len(pathAndQuery) != 2 {
+			c.errMsg = errors.New("url path ")
 			return c
 		}
-		// 遍历赋值参数
-		for key, val := range queryMap {
-			c.Query(key, val)
+		index := strings.Index(pathURL, "?")
+		if index > -1 {
+			// 裁剪字符串
+			query := pathURL[index-1:]
+			pathURL = pathURL[:index]
+			// 解析参数
+			queryMap := make(map[string]string)
+			err := form.DecodeString(&queryMap, query)
+			if err != nil {
+				c.errMsg = err
+				return c
+			}
+			// 遍历赋值参数
+			for key, val := range queryMap {
+				c.Query(key, val)
+			}
 		}
+	} else {
+		// 不需要处理参数
+		c.pathURL += pathURL
 	}
-	// 不需要处理参数
-	c.pathURL += pathURL
 	return c
 }
 
