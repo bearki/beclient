@@ -21,23 +21,24 @@ import (
 
 // BeClient 客户端控制器
 type BeClient struct {
-	baseURL           string                   // 基本网址Host Name
-	pathURL           string                   // 路由地址
-	contentType       ContentTypeType          // 资源类型（会根据该类型来格式化请求参数，默认值：application/json）
-	headers           sync.Map                 // 请求头
-	cookies           sync.Map                 // 请求Cookie
-	querys            url.Values               // 路由地址后的追加参数
-	method            MethodType               // 请求方法类型
-	data              interface{}              // 请求参数
-	isDownloadRequest bool                     // 是否为下载请求
-	downloadSavePath  string                   // 下载资源保存路径
-	downloadCallFunc  DownloadCallbackFuncType // 下载进度回调函数
-	timeOut           time.Duration            // 请求及响应的超时时间
-	client            *http.Client             // HTTP客户端
-	request           *http.Request            // 请求体
-	response          *http.Response           // 响应体
-	debug             bool                     // 是否Debug输出，（输出为json格式化后的数据）
-	errMsg            error                    // 错误信息
+	baseURL              string                   // 基本网址Host Name
+	disabledBaseURLParse bool                     // 是否禁用基础地址解析
+	pathURL              string                   // 路由地址
+	contentType          ContentTypeType          // 资源类型（会根据该类型来格式化请求参数，默认值：application/json）
+	headers              sync.Map                 // 请求头
+	cookies              sync.Map                 // 请求Cookie
+	querys               url.Values               // 路由地址后的追加参数
+	method               MethodType               // 请求方法类型
+	data                 interface{}              // 请求参数
+	isDownloadRequest    bool                     // 是否为下载请求
+	downloadSavePath     string                   // 下载资源保存路径
+	downloadCallFunc     DownloadCallbackFuncType // 下载进度回调函数
+	timeOut              time.Duration            // 请求及响应的超时时间
+	client               *http.Client             // HTTP客户端
+	request              *http.Request            // 请求体
+	response             *http.Response           // 响应体
+	debug                bool                     // 是否Debug输出，（输出为json格式化后的数据）
+	errMsg               error                    // 错误信息
 }
 
 // DownloadCallbackFuncType 下载内容回调方法类型
@@ -46,10 +47,22 @@ type BeClient struct {
 type DownloadCallbackFuncType func(currSize, totalSize float64)
 
 // New 创建一个基础客户端
-// @return *BeClient 客户端指针
-func New(baseURL string) *BeClient {
+// @params baseURL              string    基础访问地址
+// @params disabledBaseURLParse ...bool   是否禁用基础地址解析
+// @return                      *BeClient 客户端指针
+func New(baseURL string, disabledBaseURLParse ...bool) *BeClient {
 	// 新建客户端
 	c := new(BeClient)
+	// 初始化默认超时时间为15秒
+	c.TimeOut(time.Second * 15)
+	// 初始化默认资源类型
+	c.ContentType(ContentTypeJson)
+	// 是否禁用地址解析
+	if len(disabledBaseURLParse) > 0 && disabledBaseURLParse[0] {
+		c.disabledBaseURLParse = true
+		c.baseURL = baseURL
+		return c
+	}
 	// 处理基本网址
 	u, err := url.Parse(baseURL)
 	if err != nil {
@@ -71,10 +84,6 @@ func New(baseURL string) *BeClient {
 			c.Query(key, query.Get(key))
 		}
 	}
-	// 初始化默认资源类型
-	c.ContentType(ContentTypeJson)
-	// 初始化默认超时时间为15秒
-	c.TimeOut(time.Second * 15)
 	// 返回创建的客户端
 	return c
 }
@@ -84,12 +93,16 @@ func New(baseURL string) *BeClient {
 // @params pathURL string    路由地址
 // @return         *BeClient 客户端指针
 func (c *BeClient) Path(pathURL string) *BeClient {
+	// 禁用地址解析后该函数禁用
+	if c.disabledBaseURLParse {
+		return c
+	}
 	// 根据第一个问号分割字符串
 	index := strings.Index(pathURL, "?")
 	if index > -1 {
 		// 裁剪字符串
-		query := pathURL[index-1:]
 		pathURL = pathURL[:index]
+		query := pathURL[index+1:]
 		// 解析参数
 		queryMap := make(map[string]string)
 		err := form.DecodeString(&queryMap, query)
@@ -284,7 +297,7 @@ func (c *BeClient) GetRequest() *http.Request {
 	return c.request
 }
 
-// GetRequest 获取响应体
+// GetResponse 获取响应体
 // @return *http.Response 响应体
 func (c *BeClient) GetResponse() *http.Response {
 	return c.response
@@ -436,7 +449,20 @@ func (c *BeClient) createRequest() error {
 	}
 	// 先拼接URL参数
 	if len(c.querys) > 0 {
-		c.pathURL += fmt.Sprintf("?%s", c.querys.Encode())
+		// 判断是否禁用了地址解析
+		if c.disabledBaseURLParse {
+			if strings.Contains(c.baseURL, "?") {
+				c.baseURL += fmt.Sprintf("&%s", c.querys.Encode())
+			} else {
+				c.baseURL += fmt.Sprintf("?%s", c.querys.Encode())
+			}
+		} else {
+			if strings.Contains(c.pathURL, "?") || strings.Contains(c.baseURL, "?") {
+				c.pathURL += fmt.Sprintf("&%s", c.querys.Encode())
+			} else {
+				c.pathURL += fmt.Sprintf("?%s", c.querys.Encode())
+			}
+		}
 	}
 	// 创建请求体
 	c.request, err = http.NewRequest(string(c.method), c.baseURL+c.pathURL, bytes.NewReader(reqBody))
