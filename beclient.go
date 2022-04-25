@@ -341,80 +341,8 @@ func (c *BeClient) send(resData interface{}, resContentType ...ContentTypeType) 
 	c.response = res
 	// 判断是否为下载请求
 	if c.isDownloadRequest { // 下载请求
-		// 判断是否请求成功
-		if res.StatusCode != http.StatusOK {
-			errBody, err := ioutil.ReadAll(res.Body)
-			if err != nil {
-				return err
-			}
-			return fmt.Errorf(string(errBody))
-		}
-		// 判断是否需要保存到文件中
-		if len(c.downloadSavePath) >= 0 { // 需要保存到文件中
-			// 判断文件夹部分是否为空
-			saveDir := filepath.Dir(c.downloadSavePath)
-			if len(saveDir) > 0 {
-				// 创建文件夹部分
-				err = os.MkdirAll(saveDir, 0755)
-				if err != nil {
-					return err
-				}
-			}
-			// 打开文件，边下载边写入，防止内存占用高
-			file, err := os.OpenFile(c.downloadSavePath, os.O_CREATE|os.O_WRONLY|os.O_SYNC, 0666)
-			if err != nil {
-				return err
-			}
-			// 延迟关闭文件
-			defer file.Close()
-			// 定义已下载的大小
-			var currSize int
-			// 读取响应
-			for {
-				// 定义临时变量（每次读5MB）
-				temp := make([]byte, 1024*5)
-				// 读取响应体
-				size, err := res.Body.Read(temp)
-				// 追加已下载大小
-				currSize += size
-				// 判断读取是否正确
-				if err != nil {
-					// 读取结束，跳出循环
-					if err == io.EOF {
-						// 写入到文件
-						n, err := file.Write(temp[:size])
-						// 判断是否写入正确
-						if err != nil {
-							return err
-						}
-						if n != size {
-							return errors.New("write to file byte length inconsistency")
-						}
-						// 回调进度
-						c.downloadCallFunc(float64(currSize), float64(res.ContentLength))
-						// 跳出循环
-						break
-					}
-					// 有错误，直接返回错误
-					return err
-				}
-				// 写入到文件
-				n, err := file.Write(temp[:size])
-				// 判断是否写入正确
-				if err != nil {
-					return err
-				}
-				if n != size {
-					return errors.New("write to file byte length inconsistency")
-				}
-				// 回调进度
-				c.downloadCallFunc(float64(currSize), float64(res.ContentLength))
-			}
-			// 下载成功
-			return nil
-		}
-		// 没有保存路径，直接报错
-		return errors.New("download file save path is null")
+		// 执行下载
+		return c.download(res)
 	}
 	// 普通请求
 	// 直接获取全部内容
@@ -424,6 +352,90 @@ func (c *BeClient) send(resData interface{}, resContentType ...ContentTypeType) 
 	}
 	// 转换响应内容，结束请求
 	return c.responseConverData(resBody, resData, resContentType...)
+}
+
+// download 下载文件
+func (c *BeClient) download(res *http.Response) error {
+	// 发送HEAD请求
+	// 判断响应是否为空
+	if res == nil {
+		return errors.New("response is nil pointer address")
+	}
+	// 判断是否请求成功
+	if res.StatusCode != http.StatusOK {
+		errBody, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf(string(errBody))
+	}
+	// 判断是否支持分片下载
+	// 判断是否需要保存到文件中
+	if len(c.downloadSavePath) >= 0 { // 需要保存到文件中
+		// 判断文件夹部分是否为空
+		saveDir := filepath.Dir(c.downloadSavePath)
+		if len(saveDir) > 0 {
+			// 创建文件夹部分
+			err := os.MkdirAll(saveDir, 0755)
+			if err != nil {
+				return err
+			}
+		}
+		// 打开文件，边下载边写入，防止内存占用高
+		file, err := os.OpenFile(c.downloadSavePath, os.O_CREATE|os.O_WRONLY|os.O_SYNC, 0666)
+		if err != nil {
+			return err
+		}
+		// 延迟关闭文件
+		defer file.Close()
+		// 定义已下载的大小
+		var currSize int
+		// 读取响应
+		for {
+			// 定义临时变量（每次读5MB）
+			temp := make([]byte, 1024*5)
+			// 读取响应体
+			size, err := res.Body.Read(temp)
+			// 追加已下载大小
+			currSize += size
+			// 判断读取是否正确
+			if err != nil {
+				// 读取结束，跳出循环
+				if err == io.EOF {
+					// 写入到文件
+					n, err := file.Write(temp[:size])
+					// 判断是否写入正确
+					if err != nil {
+						return err
+					}
+					if n != size {
+						return errors.New("write to file byte length inconsistency")
+					}
+					// 回调进度
+					c.downloadCallFunc(float64(currSize), float64(res.ContentLength))
+					// 跳出循环
+					break
+				}
+				// 有错误，直接返回错误
+				return err
+			}
+			// 写入到文件
+			n, err := file.Write(temp[:size])
+			// 判断是否写入正确
+			if err != nil {
+				return err
+			}
+			if n != size {
+				return errors.New("write to file byte length inconsistency")
+			}
+			// 回调进度
+			c.downloadCallFunc(float64(currSize), float64(res.ContentLength))
+		}
+		// 下载成功
+		return nil
+	}
+	// 没有保存路径，直接报错
+	return errors.New("download file save path is null")
 }
 
 // createClient 创建HTTP客户端
