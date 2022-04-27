@@ -156,35 +156,35 @@ func (c *BeClient) download() error {
 	// 判断是否请求成功
 	if err != nil {
 		// 直接走单线程下载
-		return c.singleThreadDownload(headRes)
+		return c.singleThreadDownload()
 	}
 	if headRes == nil {
 		// 直接走单线程下载
-		return c.singleThreadDownload(headRes)
+		return c.singleThreadDownload()
 	}
 	// 结束时释放
 	defer headRes.Body.Close()
 	// 判断是否请求成功
 	if headRes.StatusCode != http.StatusOK {
 		// 直接走单线程下载
-		return c.singleThreadDownload(headRes)
+		return c.singleThreadDownload()
 	}
 	// 判断大小是否小于缓冲区
 	if headRes.ContentLength <= c.downloadBufferSize {
 		// 直接走单线程下载
-		return c.singleThreadDownload(headRes)
+		return c.singleThreadDownload()
 	}
 	// 判断是否支持分片下载
 	if !strings.Contains(headRes.Header.Get("Accept-Ranges"), "bytes") {
 		// 直接走单线程下载
-		return c.singleThreadDownload(headRes)
+		return c.singleThreadDownload()
 	}
 	// 走多线程下载
 	return c.multiThreadDownload(headRes)
 }
 
 // singleThreadDownload 单线程下载
-func (c *BeClient) singleThreadDownload(headRes *http.Response) error {
+func (c *BeClient) singleThreadDownload() error {
 	// 发送请求
 	res, err := c.client.Do(c.request)
 	if err != nil {
@@ -221,7 +221,7 @@ func (c *BeClient) singleThreadDownload(headRes *http.Response) error {
 	// 已下载的大小
 	var currSize int64
 	// 读取响应
-	for currSize < headRes.ContentLength {
+	for currSize < res.ContentLength {
 		// 读取响应体
 		size, err := res.Body.Read(downBuffer)
 		// 追加已下载大小
