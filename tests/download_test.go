@@ -9,14 +9,15 @@ import (
 )
 
 func TestDownload(t *testing.T) {
-	urls := "http://viss.sparker.xyz/20220411%2F92019b7bafd041409df795315f6061b0%2F20220411_0_92019b7bafd041409df795315f6061b0_0_0_5c9be60b3097307093e25680ea2a32f3.jpg?e=1649933578&token=nCBdvQS7iqRAhixysVQQC0OxNqYd4vEPGdnWWUNs:WCEz4KDMQZDZk9KlkyUZvLjIcwU="
-	b := make(map[string]interface{})
-	fmt.Println(beclient.New(urls, true).
-		Debug().
-		TimeOut(time.Hour*10).
+	urls := "http://mirror.aarnet.edu.au/pub/TED-talks/911Mothers_2010W-480p.mp4"
+	err := beclient.New(urls, true).
 		// Debug().
-		Download("qqq.jpg", func(currSize, totalSize float64) {}).
-		Get(nil),
-	)
-	fmt.Println(b)
+		TimeOut(time.Hour*10).
+		DownloadMultiThread(5, 1024*1024).
+		Download("qqq.mp4", func(currSize, totalSize float64) {
+			fmt.Println("已下载：", int64(currSize), int64(totalSize))
+		}).
+		Get(nil)
+	fmt.Println()
+	fmt.Println("ERROR:", err)
 }
